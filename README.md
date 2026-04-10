@@ -1,2 +1,40 @@
 # Control-H1
-A new hybrid architecture combining the core principles of BLT (Byte Latent Transformer) And Mamba-2 with its SSD breakthrough with the original Transformer architecture. Aiming to provide a better model for the future, this is for research purposes only.   
+
+A hybrid architecture mixing ideas from BLT (Byte Latent Transformer), Mamba-2 (SSD), and the original Transformer.
+
+Works directly on raw bytes instead of tokens, with dynamic patching and a mixed attention/state-space core.
+
+Still experimental. Built to try out different architecture ideas, not for production.
+
+## What’s inside
+
+- Byte-level input (no tokenizer)
+- Entropy-based patching
+- Latent compression stage
+- Hybrid stack (Transformer + Mamba-style blocks)
+- Custom checkpoint format
+
+## Files
+
+- model.py – model definition
+- train.py – training loop
+- config.py – config
+
+Train:
+%%%
+python train.py pretrain --data data.txt
+%%%
+
+Finetune:
+%%%
+python train.py finetune --data data.jsonl
+%%%
+
+Sample:
+```python
+python train.py sample --checkpoint model.hwcf
+```
+
+## Notes
+
+This is a research project. Expect rough edges.
