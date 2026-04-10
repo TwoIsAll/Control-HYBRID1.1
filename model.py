@@ -1,5 +1,6 @@
 from __future__ import annotations
 import io
+import json
 import math
 import os
 import struct
@@ -840,7 +841,7 @@ class ControlH1Model(nn.Module):
         extra_meta: Optional[Dict[str, str]] = None,
     ) -> None:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        cfg_json = str(self.configuration.to_dict()).encode("utf-8")
+        cfg_json = json.dumps(self.configuration.to_dict()).encode("utf-8")
         state = self.state_dict()
         keys = sorted(state.keys())
         entries = []
@@ -860,7 +861,6 @@ class ControlH1Model(nn.Module):
             offset = blob.tell()
         opt_blob = b""
         if optimizer_state is not None:
-            opt_blob = torch.save(optimizer_state, io.BytesIO())
             buf = io.BytesIO()
             torch.save(optimizer_state, buf)
             opt_blob = buf.getvalue()
@@ -872,7 +872,7 @@ class ControlH1Model(nn.Module):
         }
         if extra_meta:
             metadata.update(extra_meta)
-        meta_blob = str(metadata).encode("utf-8")
+        meta_blob = json.dumps(metadata).encode("utf-8")
         with open(path, "wb") as f:
             f.write(MODEL_MAGIC)
             f.write(struct.pack("<I", MODEL_VERSION))
@@ -915,8 +915,8 @@ class ControlH1Model(nn.Module):
             opt_len = struct.unpack("<I", f.read(4))[0]
             cfg_blob = f.read(cfg_len)
             meta_blob = f.read(meta_len)
-            cfg_dict = eval(cfg_blob.decode("utf-8"))
-            meta_dict = eval(meta_blob.decode("utf-8"))
+            cfg_dict = json.loads(cfg_blob.decode("utf-8"))
+            meta_dict = json.loads(meta_blob.decode("utf-8"))
             configuration = HybridConfig.from_dict(cfg_dict)
             model = ControlH1Model(configuration)
             table = []
@@ -1862,7 +1862,7 @@ def quick_ablation_step(
     x = torch.randint(0, 256, (batch_size, sequence_length), device=device, dtype=torch.long)
     output_tensor = model(x, labels=x, return_aux=True)
     return AblationResult(
-        label=f"pattern={cfg.hybrid_pattern},scan={cfg.ssm_scan_mode}",
+        label=f"pattern={configuration.hybrid_pattern},scan={configuration.ssm_scan_mode}",
         params=model.estimate_num_params(),
         loss=float(output_tensor["loss"].item()),
         avg_patch_count=float(output_tensor["avg_patch_count"].item()),
@@ -1927,7 +1927,7 @@ def format_scan_benchmarks(data: Dict[str, List[PerfSample]]) -> str:
         lines.append("seq | step_ms | toks_per_sec | mem_alloc_mb | mem_peak_mb")
         for r in rows:
             lines.append(
-                f"{r.seq_len:4d} | {r.step_ms:8.2f} | {r.toks_per_sec:12.1f} | "
+                f"{r.sequence_length:4d} | {r.step_ms:8.2f} | {r.toks_per_sec:12.1f} | "
                 f"{r.mem_alloc_mb:11.1f} | {r.mem_peak_mb:10.1f}"
             )
         lines.append("")
@@ -1971,7 +1971,7 @@ class ActivationMonitor:
             if not torch.is_tensor(output_tensor):
                 return
             x = output_tensor.detach().float()
-            self.statistics[name] = (float(x.mean().item()), float(x.standard_deviation().item()))
+            self.statistics[name] = (float(x.mean().item()), float(x.std().item()))
         return fn
 
     def attach(self, module_filter: Optional[callable] = None) -> None:
