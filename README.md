@@ -14,6 +14,8 @@ Meanwhile, Mamba-2 (Dao & Gu, 2024) showed that state space models can achieve p
 
 This implementation explores what happens when you combine these ideas: a byte-level frontend with entropy-based patching, a hybrid backbone mixing Transformer and Mamba-2 layers, and a decoder that converts patches back to byte-level predictions.
 
+**Important**: This code is experimental and untested. The implementation may contain bugs, numerical instability issues, or architectural errors. Use at your own risk. This is primarily a research exploration rather than production-ready software.
+
 ## Architecture Overview
 
 The model consists of three stages:
