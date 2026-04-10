@@ -20,18 +20,20 @@ Still experimental. Built to try out different architecture ideas, not for produ
 - train.py – training loop
 - config.py – config
 
+## Usage
+
 Train:
-%%%
+```bash
 python train.py pretrain --data data.txt
-%%%
+```
 
 Finetune:
-%%%
+```bash
 python train.py finetune --data data.jsonl
-%%%
+```
 
 Sample:
-```python
+```bash
 python train.py sample --checkpoint model.hwcf
 ```
 
