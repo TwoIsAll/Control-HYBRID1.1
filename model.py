@@ -455,21 +455,82 @@ class ByteEmbedding(nn.Module):
     def forward(self, x_bytes: torch.Tensor) -> torch.Tensor:
         return self.drop(self.emb(x_bytes))
 
+class MultiHeadAttention(nn.Module):
+
+    def __init__(self, d_model: int, n_heads: int) -> None:
+        super().__init__()
+        assert d_model % n_heads == 0
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_k = d_model // n_heads
+        self.query_projection = nn.Linear(d_model, d_model)
+        self.key_projection = nn.Linear(d_model, d_model)
+        self.value_projection = nn.Linear(d_model, d_model)
+        self.output_projection = nn.Linear(d_model, d_model)
+
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        batch_size, sequence_length, _ = x.shape
+        query = self.query_projection(x).view(batch_size, sequence_length, self.n_heads, self.d_k).transpose(1, 2)
+        key = self.key_projection(x).view(batch_size, sequence_length, self.n_heads, self.d_k).transpose(1, 2)
+        value = self.value_projection(x).view(batch_size, sequence_length, self.n_heads, self.d_k).transpose(1, 2)
+        attention_scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.d_k)
+        if mask is not None:
+            attention_scores = attention_scores.masked_fill(mask == 0, float("-inf"))
+        attention_weights = F.softmax(attention_scores, dim=-1)
+        attention_output = torch.matmul(attention_weights, value)
+        attention_output = attention_output.transpose(1, 2).contiguous().view(batch_size, sequence_length, self.d_model)
+        return self.output_projection(attention_output)
+
+class FeedForward(nn.Module):
+
+    def __init__(self, d_model: int, d_ff: int) -> None:
+        super().__init__()
+        self.first_linear = nn.Linear(d_model, d_ff)
+        self.second_linear = nn.Linear(d_ff, d_model)
+        self.activation = nn.GELU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.second_linear(self.activation(self.first_linear(x)))
+
+class TransformerEncoderLayer(nn.Module):
+
+    def __init__(self, d_model: int, n_heads: int, d_ff: int, dropout: float = 0.1) -> None:
+        super().__init__()
+        self.self_attention = MultiHeadAttention(d_model, n_heads)
+        self.feed_forward_network = FeedForward(d_model, d_ff)
+        self.attention_layer_norm = nn.LayerNorm(d_model)
+        self.feed_forward_layer_norm = nn.LayerNorm(d_model)
+        self.attention_dropout = nn.Dropout(dropout)
+        self.feed_forward_dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        attention_output = self.self_attention(x)
+        x = x + self.attention_dropout(attention_output)
+        x = self.attention_layer_norm(x)
+        feed_forward_output = self.feed_forward_network(x)
+        x = x + self.feed_forward_dropout(feed_forward_output)
+        x = self.feed_forward_layer_norm(x)
+        return x
+
 class EntropyPatchPredictor(nn.Module):
 
-    def __init__(self, d_model: int, hidden: int = 128) -> None:
+    def __init__(self, d_model: int, hidden: int = 128, n_heads: int = 4, n_layers: int = 2) -> None:
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(d_model, hidden),
-            nn.SiLU(),
-            nn.Linear(hidden, hidden),
-            nn.SiLU(),
-            nn.Linear(hidden, 1),
-        )
+        self.input_projection = nn.Linear(d_model, hidden)
+        self.transformer_layers = nn.ModuleList([
+            TransformerEncoderLayer(hidden, n_heads, hidden * 4, dropout=0.1)
+            for _ in range(n_layers)
+        ])
+        self.output_projection = nn.Linear(hidden, 1)
+        self.layer_normalization = nn.LayerNorm(hidden)
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
-        e = self.net(h).squeeze(-1)
-        return F.softplus(e)
+        x = self.input_projection(h)
+        x = self.layer_normalization(x)
+        for transformer_layer in self.transformer_layers:
+            x = transformer_layer(x)
+        entropy = self.output_projection(x).squeeze(-1)
+        return F.softplus(entropy)
 
 def _segment_patches_from_entropy(
     entropy: torch.Tensor,
