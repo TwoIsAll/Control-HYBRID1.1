@@ -8,7 +8,7 @@ The current configuration targets about 5M parameters.
 
 The model has three main parts:
 
-**Frontend**: Takes raw bytes, embeds them, and uses an entropy predictor to segment them into patches. High-entropy (complex) regions get more granular processing, low-entropy (repetitive) regions get compressed. The entropy predictor is a small MLP that's trained end-to-end with the rest of the model.
+**Frontend**: Takes raw bytes, embeds them, and uses an entropy predictor to segment them into patches. High-entropy (complex) regions get more granular processing, low-entropy (repetitive) regions get compressed. The entropy predictor is a small transformer with multi-head self-attention that's trained end-to-end with the rest of the model. The transformer uses custom MultiHeadAttention, FeedForward, and TransformerEncoderLayer classes with descriptive variable names for better readability.
 
 The segmentation algorithm is greedy - it starts a new patch when entropy exceeds a threshold or the patch reaches max length. This prevents pathological cases like single-byte patches or patches that grow without bound. Patches can be aggregated using mean, max, sum, or attention-weighted pooling.
 
