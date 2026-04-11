@@ -1,6 +1,6 @@
 DEFAULT_HYBRID_CONFIG = {
     "vocab_size": 256,
-    "context_len": 2048,
+    "context_len": 512,
     "d_model": 128,
     "n_layers": 9,
     "n_heads": 8,
@@ -17,7 +17,7 @@ DEFAULT_HYBRID_CONFIG = {
     "mamba_state_dim": 32,
     "mamba_conv_kernel": 3,
     "mamba_expand": 2,
-    "hybrid_pattern": "tmtm",
+    "hybrid_pattern": "mmmt",
     "tie_embeddings": False,
     "init_std": 0.02,
     "layer_scale_init": 1.0,
