@@ -622,9 +622,12 @@ class BLTFrontEnd(nn.Module):
     ) -> Tuple[torch.Tensor, List[List[Tuple[int, int]]], torch.Tensor]:
         b, t = x_bytes.shape
         h = self.byte_emb(x_bytes)
-        for blk in self.local_enc:
-            h = blk(h)
-        entropy = precomputed_entropy if precomputed_entropy is not None else self.entropy_pred(h).detach()
+        if precomputed_entropy is None:
+            for blk in self.local_enc:
+                h = blk(h)
+            entropy = self.entropy_pred(h).detach()
+        else:
+            entropy = precomputed_entropy
         if force_uniform_patch:
             segments: List[List[Tuple[int, int]]] = []
             step = self.configuration.max_patch_len
