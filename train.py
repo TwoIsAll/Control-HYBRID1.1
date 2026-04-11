@@ -12,6 +12,7 @@ import torch
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+import pandas as pd
 from model import (
     HybridConfig,
     ControlH1Model,
@@ -36,7 +37,6 @@ def read_jsonl(path: str) -> List[Dict[str, object]]:
     return rows
 
 def read_parquet_records(path: str) -> List[Dict[str, object]]:
-    import pandas as pd
     return pd.read_parquet(path).to_dict(orient="records")
 
 def conversation_record_to_bytes(rec: Dict[str, object]) -> List[int]:
