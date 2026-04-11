@@ -7,7 +7,7 @@ import struct
 import time
 import random
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -764,14 +764,14 @@ class ControlH1Model(nn.Module):
         if configuration.tie_embeddings and configuration.d_model == configuration.latent_dim:
             self.back.head.weight = self.front.byte_emb.emb.weight
 
-    def _init_weights(self, standard_deviation: float) -> None:
+    def _init_weights(self, std: float) -> None:
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, mean=0.0, std=standard_deviation)
+                nn.init.normal_(m.weight, mean=0.0, std=std)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Embedding):
-                nn.init.normal_(m.weight, mean=0.0, std=standard_deviation)
+                nn.init.normal_(m.weight, mean=0.0, std=std)
             elif isinstance(m, nn.Conv1d):
                 nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
                 if m.bias is not None:
@@ -900,7 +900,7 @@ class ControlH1Model(nn.Module):
 
     def load_hwcf(
         path: str,
-        map_location: str | torch.device = "cpu",
+        map_location: Union[str, torch.device] = "cpu",
         load_optimizer: bool = False,
     ) -> Tuple["ControlH1Model", Optional[Dict[str, object]], Dict[str, str]]:
         with open(path, "rb") as f:
