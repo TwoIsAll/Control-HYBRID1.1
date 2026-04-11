@@ -2,7 +2,7 @@
 
 This is an experimental hybrid language model that mixes Mamba-2 state space models, Transformer attention, and Byte Latent Transformer ideas. It works directly on bytes not tokens and uses entropy-based dynamic patching to figure out where to spend computation.
 
-Current config is around 20M parameters.
+Current config is around 34M parameters.
 
 ## Architecture
 
