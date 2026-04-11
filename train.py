@@ -215,14 +215,15 @@ def train_loop(args):
     print(format_param_report(model))
     optimizer = build_optimizer(model, args.lr, args.weight_decay, (args.beta1, args.beta2))
     scheduler = build_scheduler(optimizer, args.warmup_steps, max(1, args.epochs * len(train_loader)))
-    scaler = torch.cuda.amp.GradScaler(enabled=(args.amp and device.type == "cuda"))
+    scaler = torch.amp.GradScaler('cuda', enabled=(args.amp and device.type == "cuda"))
     state, _ = load_checkpoint_if_any(model, optimizer, scheduler, args.resume, device)
     model.train()
     os.makedirs(args.output_dir, exist_ok=True)
     for epoch in range(state.epoch, args.epochs):
         state.epoch = epoch + 1
         loss_acc = 0.0
-        for batch in tqdm(train_loader):
+        pbar = tqdm(train_loader, desc=f"Epoch {state.epoch}/{args.epochs}")
+        for batch in pbar:
             x = batch["input_ids"].to(device)
             y = batch["labels"].to(device)
             entropy = batch["entropy"].to(device) if "entropy" in batch else None
@@ -248,6 +249,7 @@ def train_loop(args):
                 scheduler.step()
             state.global_step += 1
             loss_acc += loss.item()
+            pbar.set_postfix({"loss": f"{loss.item():.4f}", "avg_loss": f"{loss_acc/(state.global_step - (epoch-1)*len(train_loader)):.4f}"})
         val = evaluate(model, val_loader, device, args.eval_batches, args.amp)
         print(f"Epoch {state.epoch}: train_loss={loss_acc/len(train_loader):.5f} val_loss={val['loss']:.5f} val_ppl={val['ppl']:.3f}")
         save_epoch_checkpoint(model, optimizer, scheduler, args.output_dir, state, entropy_data=entropy_data)
