@@ -175,18 +175,18 @@ def load_checkpoint_if_any(model, optimizer, scheduler, resume_path, device):
     return state
 
 def precompute_entropy(data: Sequence[int], config: HybridConfig, device: torch.device, batch_size: int = 32) -> torch.Tensor:
-    from model import BLTFrontEnd
-    frontend = BLTFrontEnd(config).to(device)
-    frontend.eval()
+    from model import BLTFrontEnd, ByteEmbedding
+    byte_emb = ByteEmbedding(config.d_model, dropout=config.byte_dropout).to(device)
+    entropy_pred = BLTFrontEnd(config).entropy_pred.to(device)
+    byte_emb.eval()
+    entropy_pred.eval()
     data_tensor = torch.tensor(data, dtype=torch.long, device=device)
     entropy_values = []
     with torch.no_grad():
         for i in tqdm(range(0, len(data), config.context_len), desc="Precomputing entropy"):
             chunk = data_tensor[i:i + config.context_len].unsqueeze(0)
-            h = frontend.byte_emb(chunk)
-            for blk in frontend.local_enc:
-                h = blk(h)
-            entropy = frontend.entropy_pred(h).squeeze(0)
+            h = byte_emb(chunk)
+            entropy = entropy_pred(h).squeeze(0)
             entropy_values.append(entropy.cpu())
     return torch.cat(entropy_values, dim=0)[:len(data)]
 
