@@ -181,7 +181,7 @@ def precompute_entropy(data: Sequence[int], config: HybridConfig, device: torch.
     data_tensor = torch.tensor(data, dtype=torch.long, device=device)
     entropy_values = []
     with torch.no_grad():
-        for i in range(0, len(data), config.context_len):
+        for i in tqdm(range(0, len(data), config.context_len), desc="Precomputing entropy"):
             chunk = data_tensor[i:i + config.context_len].unsqueeze(0)
             h = frontend.byte_emb(chunk)
             for blk in frontend.local_enc:
