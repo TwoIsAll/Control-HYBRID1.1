@@ -13,6 +13,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 import pandas as pd
+from config import DEFAULT_HYBRID_CONFIG
 from model import (
     HybridConfig,
     ControlH1Model,
@@ -78,11 +79,12 @@ def load_data_as_byte_stream(paths: Sequence[str], mode: str) -> List[int]:
 
 class ByteSequenceDataset(Dataset):
 
-    def __init__(self, byte_stream: Sequence[int], sequence_length: int, stride: Optional[int] = None, random_offset: bool = False) -> None:
+    def __init__(self, byte_stream: Sequence[int], sequence_length: int, stride: Optional[int] = None, random_offset: bool = False, precomputed_entropy: Optional[torch.Tensor] = None) -> None:
         self.sequence_length = sequence_length
         self.stride = stride or sequence_length
         self.random_offset = random_offset
         self.data = torch.tensor(byte_stream, dtype=torch.long)
+        self.precomputed_entropy = precomputed_entropy
         self.starts = list(range(0, self.data.numel() - sequence_length - 1, self.stride))
 
     def __len__(self) -> int:
@@ -93,7 +95,10 @@ class ByteSequenceDataset(Dataset):
         if self.random_offset:
             s = min(s + random.randint(0, max(0, self.stride - 1)), self.data.numel() - self.sequence_length - 1)
         x = self.data[s:s + self.sequence_length]
-        return {"input_ids": x, "labels": causal_lm_targets(x)}
+        output = {"input_ids": x, "labels": causal_lm_targets(x)}
+        if self.precomputed_entropy is not None:
+            output["entropy"] = self.precomputed_entropy[s:s + self.sequence_length]
+        return output
 
 def make_dataloader(dataset, batch_size, shuffle, num_workers, pin_memory):
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=True, num_workers=num_workers, pin_memory=pin_memory)
@@ -169,18 +174,41 @@ def load_checkpoint_if_any(model, optimizer, scheduler, resume_path, device):
         state.best_loss = float(ts.get("best_loss", meta.get("best_loss", 1e9)))
     return state
 
+def precompute_entropy(data: Sequence[int], config: HybridConfig, device: torch.device, batch_size: int = 32) -> torch.Tensor:
+    from model import BLTFrontEnd
+    frontend = BLTFrontEnd(config).to(device)
+    frontend.eval()
+    data_tensor = torch.tensor(data, dtype=torch.long, device=device)
+    entropy_values = []
+    with torch.no_grad():
+        for i in range(0, len(data), config.context_len):
+            chunk = data_tensor[i:i + config.context_len].unsqueeze(0)
+            h = frontend.byte_emb(chunk)
+            for blk in frontend.local_enc:
+                h = blk(h)
+            entropy = frontend.entropy_pred(h).squeeze(0)
+            entropy_values.append(entropy.cpu())
+    return torch.cat(entropy_values, dim=0)[:len(data)]
+
 def train_loop(args):
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu else "cpu")
-    config = HybridConfig.from_dict(json.load(open(args.config_json))) if args.config_json else HybridConfig.tiny_2m_context2k()
+    config = HybridConfig.from_dict(json.load(open(args.config_json))) if args.config_json else HybridConfig.from_dict(DEFAULT_HYBRID_CONFIG)
     data = load_data_as_byte_stream(args.data, args.mode)
     if args.max_data_bytes > 0:
         data = data[:args.max_data_bytes]
     split = int(len(data) * (1.0 - args.val_ratio))
     train_bytes = data[:split]
     val_bytes = data[split:] if split < len(data) else data[-config.context_len * 4:]
-    train_loader = make_dataloader(ByteSequenceDataset(train_bytes, config.context_len, args.stride, args.random_offset), args.batch_size, True, args.num_workers, device.type == "cuda")
-    val_loader = make_dataloader(ByteSequenceDataset(val_bytes, config.context_len, max(1, config.context_len // 2)), args.batch_size, False, args.num_workers, device.type == "cuda")
+    if getattr(args, 'precompute_entropy', True):
+        print("Precomputing entropy...")
+        train_entropy = precompute_entropy(train_bytes, config, device)
+        val_entropy = precompute_entropy(val_bytes, config, device)
+    else:
+        train_entropy = None
+        val_entropy = None
+    train_loader = make_dataloader(ByteSequenceDataset(train_bytes, config.context_len, args.stride, args.random_offset, train_entropy), args.batch_size, True, args.num_workers, device.type == "cuda")
+    val_loader = make_dataloader(ByteSequenceDataset(val_bytes, config.context_len, max(1, config.context_len // 2), False, val_entropy), args.batch_size, False, args.num_workers, device.type == "cuda")
     model = ControlH1Model(config).to(device)
     print(format_param_report(model))
     optimizer = build_optimizer(model, args.lr, args.weight_decay, (args.beta1, args.beta2))
@@ -195,9 +223,10 @@ def train_loop(args):
         for batch in tqdm(train_loader):
             x = batch["input_ids"].to(device)
             y = batch["labels"].to(device)
+            entropy = batch["entropy"].to(device) if "entropy" in batch else None
             optimizer.zero_grad(set_to_none=True)
             with maybe_autocast(device, args.amp):
-                out = model(x, labels=y, return_aux=True)
+                out = model(x, labels=y, precomputed_entropy=entropy, return_aux=True)
                 loss = out["loss"]
                 loss_scaled = loss / args.grad_accum_steps
             if scaler.is_enabled():
@@ -249,6 +278,7 @@ def add_common_train_args(p):
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--stride", type=int, default=1024)
     p.add_argument("--random-offset", action="store_true")
+    p.add_argument("--precompute-entropy", action="store_true", default=True)
     p.add_argument("--val-ratio", type=float, default=0.02)
     p.add_argument("--eval-batches", type=int, default=64)
     p.add_argument("--max-data-bytes", type=int, default=0)
