@@ -1,108 +1,82 @@
 # ControlH1: Hybrid Byte-Level Language Model
 
-This is an experimental implementation of a hybrid language model that combines Mamba-2 state space models, Transformer attention, and Byte Latent Transformer principles. The model works directly on bytes instead of tokens and uses entropy-based dynamic patching to decide where to spend computation.
+This is an experimental hybrid language model that mixes Mamba-2 state space models, Transformer attention, and Byte Latent Transformer ideas. It works directly on bytes not tokens and uses entropy-based dynamic patching to figure out where to spend computation.
 
-The current configuration targets about 5M parameters.
+Current config is around 2.3M parameters.
 
 ## Architecture
 
-The model has three main parts:
+Three main parts:
 
-**Frontend**: Takes raw bytes, embeds them, and uses an entropy predictor to segment them into patches. High-entropy (complex) regions get more granular processing, low-entropy (repetitive) regions get compressed. The entropy predictor is a small transformer with multi-head self-attention that's trained end-to-end with the rest of the model. The transformer uses custom MultiHeadAttention, FeedForward, and TransformerEncoderLayer classes with descriptive variable names for better readability.
+**Frontend**: Takes raw bytes, embeds them, uses an entropy predictor (small transformer with attention) to segment into patches. High-entropy areas get more granular processing, low-entropy repetitive areas get compressed. The segmentation is greedy - starts new patch when entropy exceeds threshold or patch hits max length.
 
-The segmentation algorithm is greedy - it starts a new patch when entropy exceeds a threshold or the patch reaches max length. This prevents pathological cases like single-byte patches or patches that grow without bound. Patches can be aggregated using mean, max, sum, or attention-weighted pooling.
+**Middle**: Hybrid backbone with Transformer and Mamba-2 layers. Pattern string controls layer types - "tmtm" means Transformer, Mamba, Transformer, Mamba. You can mess with different patterns to balance speed vs accuracy.
 
-**Middle**: A hybrid backbone with Transformer and Mamba-2 layers. The pattern string controls the layer types - for example "tmtmtm" means Transformer, Mamba, Transformer, Mamba, Transformer, Mamba. You can experiment with different patterns to balance speed and accuracy.
+Transformer blocks use RoPE for positional encoding, SwiGLU activation, LayerScale, RMSNorm. Mamba-2 blocks use selective SSM with learnable discretization, SSD dual mixer, depthwise convolution, and gating.
 
-Transformer blocks use RoPE for positional encoding, SwiGLU activation, LayerScale for stability, and RMSNorm for normalization. These are standard modern transformer components.
+**Backend**: Converts patches back to byte-level predictions using local transformer. Projects patch representations to byte dimension, scatters to original positions, processes to produce logits.
 
-Mamba-2 blocks use selective SSM with learnable discretization, SSD dual mixer (linear attention with ELU), depthwise 1D convolution for local context, and gating. The selective aspect means SSM parameters can adapt based on input.
+## Why This
 
-**Backend**: Converts patches back to byte-level predictions using a local transformer. The patch representations are projected back to byte dimension and scattered to their original positions, then processed to produce byte-level logits.
+Working on bytes means no tokenization artifacts and true multilingual support. Model doesn't care what language or script. Dynamic patching lets the model decide where to focus compute instead of fixed vocab.
 
-## Why This Approach
+Trade-off is model has to learn subword structure from data, might need more training than tokenized models with built-in subword knowledge.
 
-Working on bytes eliminates tokenization artifacts and gives true multilingual support. The model doesn't care what language or script the text is in. Dynamic patching lets the model decide where to focus computation instead of using a fixed vocabulary.
-
-The trade-off is that the model has to learn subword structure from data, which might require more training than a tokenized model that already has built-in subword knowledge.
-
-Mamba layers are linear-time (efficient for long sequences) while Transformer layers are quadratic-time (better for precise attention). Mixing them lets you get the benefits of both. The pattern string is a simple way to experiment with different arrangements without changing code.
-
-## SSM Scan Modes
-
-The SelectiveSSMCore supports three scan modes:
-
-- parallel: Full parallel scan using cumulative products, efficient for short sequences
-- chunk: Chunked scan with state passing between chunks, balanced approach
-- recurrent: Pure recurrent scan, useful for very long sequences or debugging
-
-The discretization uses softplus for the time step parameter (ensures positivity) and learns state decay in log-space for numerical stability. The selective aspect means discretization parameters can vary based on input.
+Mamba layers are linear-time (good for long sequences) while Transformer layers are quadratic-time (better for precise attention). Mixing them gives benefits of both. Pattern string is simple way to experiment without code changes.
 
 ## Configuration
 
-The config is in config.py. Key settings:
+Config in config.py. Key stuff:
 
-- vocab_size: 256 (one per byte)
+- vocab_size: 256 (per byte)
 - context_len: 2048 bytes
-- d_model: 96
-- n_layers: 6
+- d_model: 64
+- n_layers: 4
 - n_heads: 4
-- d_ff: 256
-- hybrid_pattern: "tmtmtm"
+- d_ff: 192
+- hybrid_pattern: "tmtm"
 - max_patch_len: 16
 - min_patch_len: 1
 - patch_entropy_threshold: 2.2
-- local_encoder_layers: 1
-- local_decoder_layers: 1
 - mamba_state_dim: 16
-- mamba_conv_kernel: 3
 - mamba_expand: 2
 - ssd_rank: 16
-- entropy_predictor_hidden: 64
-- patch_embed_dim: 96
-- patch_agg: "mean"
-- ssm_scan_mode: "auto"
 
-You can modify these to experiment with different sizes and architectures. The model.py file also has a tiny_2m_context2k() method for an even smaller config.
+There's also TINY_HYBRID_CONFIG for ~240K params if you want something even smaller.
 
 ## Running
 
-Run the model directly to see parameter count:
+Run model to see param count:
 ```
 python model.py
 ```
 
 Other commands:
-- `python model.py info` - detailed model info
+- `python model.py info` - detailed info
 - `python model.py dryrun` - test forward pass
 - `python model.py generate` - generate text
-- `python model.py bench` - benchmark scan modes
-- `python model.py ablate` - run ablation suite
-- `python model.py smoke` - run smoke tests
-- `python model.py export` - save model to .hwcf format
-- `python model.py validate` - validate a .hwcf file
+- `python model.py bench` - benchmark
+- `python model.py smoke` - smoke tests
+- `python model.py export` - save to .hwcf
+- `python model.py validate` - validate .hwcf file
+
+Train:
+```
+python train.py pretrain --data input.txt
+python train.py finetune --data tiny.jsonl
+```
 
 ## Checkpoint Format
 
-The .hwcf format is a simple binary format that stores magic bytes, version info, model config as JSON, tensor index (name, dtype, shape, offset, size), and tensor data aligned to 16-byte boundaries. It also includes optimizer state and training metadata for checkpoint resumption.
+.hwcf is simple binary format with magic bytes, version, config JSON, tensor index, and tensor data aligned to 16-byte boundaries. Includes optimizer state and training metadata for resumption.
 
-## Observations
+## Notes
 
-At about 5M parameters, this is much smaller than modern LLMs (billions of parameters). The hybrid architecture helps make the most of limited parameters by using SSM layers for efficient long-range context without quadratic attention cost everywhere.
+This code is experimental and untested. Might have bugs or numerical issues. Use at your own risk. Mainly for research and exploration not production.
 
-During training, you can observe the model learning to place patch boundaries at sensible locations. For English text, patches often align with word boundaries. For code, they might align with tokens or statements.
+Model needs substantial data to learn byte-level patterns. Small datasets won't see much benefit over tokenization since model learns subword structure from scratch.
 
-The choice of hybrid pattern affects performance and efficiency. More Transformer layers give better retrieval but slower inference. More Mamba layers are faster but might lose some precision for tasks requiring exact attention.
-
-## Important Notes
-
-This code is experimental and untested. It may contain bugs or numerical issues. Use at your own risk. This is primarily for research and architectural exploration, not production use.
-
-The model needs substantial data to learn meaningful byte-level patterns. Small datasets won't see much benefit over tokenization since the model must learn subword structure from scratch.
-
-The entropy predictor is a simple MLP which looks at each byte position independently. This might not capture complex boundary patterns where the decision to split depends on context from neighboring positions. A transformer-based predictor would use attention to look at relationships between different byte positions when deciding where to place patch boundaries, which could capture more complex patterns but would add more parameters.
-
-Finding the optimal hybrid pattern for a given task requires experimentation. There's no theoretical guidance on what pattern works best for which tasks, so you need to try different patterns and evaluate.
+Finding optimal hybrid pattern requires experimentation. No theoretical guidance on what pattern works best for what tasks, so gotta try different ones and see.
 
 ## References
 
@@ -112,8 +86,3 @@ Finding the optimal hybrid pattern for a given task requires experimentation. Th
 - RoPE: "RoFormer: Enhanced Transformer with Rotary Position Embedding" (Su et al., 2021)
 - SwiGLU: "GLU Variants Improve Transformer" (Shazeer, 2020)
 - RMSNorm: "Root Mean Square Layer Normalization" (Zhang & Sennrich, 2019)
-- LayerScale: "On Layer Normalization in the Transformer Architecture" (Touvron et al., 2021)
-
-## Future Work
-
-Potential improvements include scaling up to larger models, systematic pattern search for optimal layer arrangements, learned aggregation instead of simple pooling, quantization support for faster inference, CUDA kernels for SSM scans, and JAX or Triton implementations for better performance.
