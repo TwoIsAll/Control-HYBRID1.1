@@ -16,6 +16,11 @@ Current config: ~34M parameters.
 
 No tokenization artifacts, true multilingual. Model learns subword structure from data. Dynamic patching lets model decide where to spend compute.
 
+## Future upgrades
+
+Optimizing and bug fixing.
+Hybrid pattern improvements (e.g. "mmmtt")
+
 ## Config (config.py)
 
 - vocab_size: 256
@@ -42,10 +47,10 @@ python train.py finetune --data tiny.jsonl --epochs 15 --batch-size 8
 
 Resume from checkpoint:
 ```
-python train.py pretrain --data train-00000-of-00001.parquet --epochs 5 --batch-size 32 --stride 512 --resume checkpoints/epoch_0002_step_00007880.hwcf
+python train.py pretrain --data train-00000-of-00001.parquet --epochs 5 --batch-size 32 --stride 512 --resume checkpoints/epoch_XXXX_step_XXXXXXXX.hwcf
 ```
 
-Entropy is precomputed automatically. Checkpoints include optimizer state and entropy data for resume.
+Entropy is precomputed automatically. Checkpoints include optimizer state and entropy data for resuming.
 
 ## Notes
 
