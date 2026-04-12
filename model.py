@@ -6,8 +6,11 @@ import os
 import struct
 import time
 import random
+import warnings
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
+
+warnings.filterwarnings('ignore', category=FutureWarning)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
