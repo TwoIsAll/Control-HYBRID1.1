@@ -314,11 +314,17 @@ def build_parser():
     ft.set_defaults(mode="finetune")
     infer = sub.add_parser("sample")
     infer.add_argument("--checkpoint", type=str, required=True)
-    infer.add_argument("--prompt", type=str, default="<|user|>\nHello\n<|end|>\n<|assistant|>\n")
+    infer.add_argument("--prompt", type=str, default="\nHello\n<|end|>\n\n")
     infer.add_argument("--max-new-tokens", type=int, default=256)
     infer.add_argument("--temperature", type=float, default=0.9)
     infer.add_argument("--top-k", type=int, default=50)
     infer.add_argument("--cpu", action="store_true")
+    run_chat = sub.add_parser("run")
+    run_chat.add_argument("--checkpoint", type=str, required=True)
+    run_chat.add_argument("--max-new-tokens", type=int, default=256)
+    run_chat.add_argument("--temperature", type=float, default=0.9)
+    run_chat.add_argument("--top-k", type=int, default=50)
+    run_chat.add_argument("--cpu", action="store_true")
     return parser
 
 def run_sample(args):
@@ -331,12 +337,47 @@ def run_sample(args):
     print(meta)
     print(bytes(y[0].tolist()).decode("utf-8", errors="replace"))
 
+def run_chat(args):
+    device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
+    model, _, meta, _ = ControlH1Model.load_hwcf(args.checkpoint, map_location=device, load_optimizer=False)
+    model.eval()
+    print(meta)
+    print("Interactive chat mode. Type 'quit' or 'exit' to end.")
+    print("-" * 60)
+    
+    conversation = b""
+    while True:
+        try:
+            user_input = input("You: ")
+            if user_input.lower() in ('quit', 'exit'):
+                print("Goodbye!")
+                break
+            if not user_input.strip():
+                continue
+            
+            conversation += bytes_from_text(f"\n{user_input}\n<|end|>\n")
+            x = torch.tensor([conversation], dtype=torch.long, device=device)
+            with torch.no_grad():
+                y = model.generate(x, max_new_tokens=args.max_new_tokens, temperature=args.temperature, top_k=args.top_k)
+            response = bytes(y[0].tolist()).decode("utf-8", errors="replace")
+            conversation = y[0].tolist()
+            print(f"Model: {response}")
+            print("-" * 60)
+        except KeyboardInterrupt:
+            print("\nGoodbye!")
+            break
+        except Exception as e:
+            print(f"Error: {e}")
+            continue
+
 def main():
     args = build_parser().parse_args()
     if args.command in ("pretrain", "finetune"):
         train_loop(args)
     elif args.command == "sample":
         run_sample(args)
+    elif args.command == "run":
+        run_chat(args)
     else:
         raise ValueError(args.command)
 
