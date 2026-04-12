@@ -345,7 +345,7 @@ def run_chat(args):
     print("Interactive chat mode. Type 'quit' or 'exit' to end.")
     print("-" * 60)
     
-    conversation = b""
+    conversation = []
     while True:
         try:
             user_input = input("You: ")
@@ -355,12 +355,12 @@ def run_chat(args):
             if not user_input.strip():
                 continue
             
-            conversation += bytes_from_text(f"\n{user_input}\n<|end|>\n")
+            conversation.extend(bytes_from_text(f"\n{user_input}\n<|end|>\n"))
             x = torch.tensor([conversation], dtype=torch.long, device=device)
             with torch.no_grad():
                 y = model.generate(x, max_new_tokens=args.max_new_tokens, temperature=args.temperature, top_k=args.top_k)
             response = bytes(y[0].tolist()).decode("utf-8", errors="replace")
-            conversation = bytes(y[0].tolist())
+            conversation = y[0].tolist()
             print(f"Model: {response}")
             print("-" * 60)
         except KeyboardInterrupt:
